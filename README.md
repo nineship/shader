@@ -16,7 +16,5 @@ test  # game3d
 # glshow
 # glgame
 
-该项目为opengl游戏贴图实现的非实时光影版本，  
-直接利用阴影贴图来实现贴图，只需要写逻辑结构即可
-不需要再渲染阴影。暂时搁置。
+该项目为opengl实时渲染版本
 # gl_shadow
