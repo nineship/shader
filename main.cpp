@@ -4,8 +4,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "learnopengl/shader.h"
+#include "learnopengl/camera.h"
+
+
 #include "stb_image.h"
-#include "camera.h"
+
 #include <iostream>
 #include <fstream>
 #include "obj.h"
@@ -17,19 +21,21 @@ void processInput(GLFWwindow *window);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 
 
-
 const unsigned int SCR_WIDTH = 1920;
 const unsigned int SCR_HEIGHT = 1080;
 float modelrotate   = 0;
 Model model;
-float lastX = SCR_WIDTH / 2.0f;
-float lastY = SCR_HEIGHT / 2.0f;
+Camera camera(glm::vec3(0.0f, 4.0f, 3.0f));
+float lastX = (float)SCR_WIDTH / 2.0;
+float lastY = (float)SCR_HEIGHT / 2.0;
 bool firstMouse = true;
-Camera camera(glm::vec3(0.0f, 3.0f, 3.0f));
-float deltaTime = 0.0f;	
+
+// timing
+float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-
+// meshes
+unsigned int planeVAO;
 static void error_callback(int error, const char* description)
 {
     fprintf(stderr, "Error: %s\n", description);
@@ -39,96 +45,7 @@ void model_init()
     printf("read model init.\n");
     model.read_model();
 }
-unsigned int init_shader()
-{
-    printf("init shader.\n");
-    const char *vertexShaderSource = "#version 330 core\n"
-    "layout (location = 0) in vec3 aPos;\n"
-    "layout (location = 1) in vec3 aNor;\n"
-    "layout (location = 2) in vec3 aText;\n"
-    "uniform mat4 model;\n"
-    "uniform mat4 view;\n"
-    "uniform mat4 projection;\n"
-    "out vec3 ourNor;\n"
-    "out vec3 FragPos;\n"
-    "out vec2 TexCoord;\n"
-    "void main()\n"
-    "{\n"
-    "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
-    "   FragPos = vec3(model * vec4(aPos, 1.0));\n"
-    "   ourNor = mat3(transpose(inverse(model))) * aNor;\n"
-    "   TexCoord = vec2(aText.x, aText.y);\n"
-    "}\0";
 
-    const char *fragmentShaderSource = "#version 330 core\n"
-    "out vec4 FragColor;\n"
-    "in vec3 ourNor;\n"
-    "in vec3 FragPos;\n"
-    "in vec2 TexCoord;\n"
-    "uniform vec3 viewPos;\n"
-    "uniform sampler2D ourTexture;\n"
-    "void main()\n"
-    "{\n"
-    "   vec3 lightColor = vec3(1.0f,1.0f,1.0f);\n"
-    "   vec3 objectColor = vec3(texture(ourTexture, TexCoord));\n"
-    "   float ambientStrength = 0.4;\n"
-    "   vec3 ambient =  ambientStrength* lightColor;\n"
-    "   vec3 lightPos = vec3(100.0f,100.0f,100.0f);\n"
-    "   vec3 norm = normalize(ourNor)\n;"
-    "   vec3 lightDir = normalize(lightPos - FragPos);\n"
-    "   float diff = max(dot(norm, lightDir), 0.0);\n"
-    "   vec3 diffuse = diff * lightColor;\n"
-    "   vec3 viewDir = normalize(viewPos - FragPos);\n"
-    "   float specularStrength = 1;\n"
-    "   vec3 reflectDir = reflect(-lightDir, norm);\n"
-    "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);\n"
-    "   vec3 specular = specularStrength * spec * lightColor;\n"
-    "   vec3 result = (ambient + diffuse + specular) * objectColor;\n"
-
-    "   //FragColor = vec4(result, 1.0);\n"
-    "   FragColor = texture(ourTexture, TexCoord);\n"
-    "}\n\0";
-
-    unsigned int vertexShader;
-    vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
-    int  success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if(!success)
-    {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
-    unsigned int fragmentShader;
-    fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
-    // check for shader compile errors
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
-
-    unsigned int shaderProgram;
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n" << infoLog << std::endl;
-    }
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    return shaderProgram;
-}
 unsigned int text(unsigned int shaderProgram,const char* name)
 {
     unsigned int texture;
@@ -146,7 +63,15 @@ unsigned int text(unsigned int shaderProgram,const char* name)
     unsigned char *data = stbi_load(name, &width, &height, &nrChannels, 0);
     if (data)
     {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        GLenum format;
+        if (nrChannels == 1)
+            format = GL_RED;
+        else if (nrChannels == 3)
+            format = GL_RGB;
+        else if (nrChannels == 4)
+            format = GL_RGBA;
+
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
     }
     else
@@ -190,60 +115,41 @@ void init_buffer(unsigned int shaderProgram)
         }
     }
 }
-
-void projection_perform(glm::vec3 cameramove,unsigned int shaderProgram)
+void draw(const Shader &shader)
 {
-    glUseProgram(shaderProgram);
-    glm::mat4 model         = glm::mat4(1.0f); 
-    glm::mat4 view          = glm::mat4(1.0f);
-    glm::mat4 projection    = glm::mat4(1.0f);
-    model = glm::rotate(model,glm::radians(modelrotate),glm::vec3(0.0f,1.0f,0.0f));
-
-    view = camera.GetViewMatrix();
-    projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 5000.0f);
-
-    unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-    unsigned int viewLoc  = glGetUniformLocation(shaderProgram, "view");
-    unsigned int projectionLoc = glGetUniformLocation(shaderProgram, "projection");
-    unsigned int viewposLoc = glGetUniformLocation(shaderProgram, "viewPos");
-
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, &view[0][0]);
-    glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
-    glUniformMatrix4fv(viewposLoc, 1, GL_FALSE, glm::value_ptr(cameramove));
-}
-void draw(unsigned int shaderProgram)
-{
+    glm::mat4 model_move         = glm::mat4(1.0f); 
     for(int k = 0; k < model.m_obj.size(); k++)
     {
         if(k == 1)
         {
-            unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-            glm::mat4 model_move         = glm::mat4(1.0f); 
+            continue;
+        }
+        if(k == 1 && 0)
+        {
+            model_move = glm::mat4(1.0f); 
             model.m_obj[k]->sky_move(OBJ_Vector4d(0,-0.1,0,0));
             model_move = glm::translate(model_move, glm::vec3(0, model.m_obj[k]->m_pos.y, 0.0f));
-            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model_move));
+            shader.setMat4("model", model_move);
         }
         if(k == 4)
         {
-            unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-            glm::mat4 model_move = glm::mat4(1.0f); 
+            model_move = glm::mat4(1.0f); 
             model.m_obj[k]->move(OBJ_Vector4d(camera.Position.x,camera.Position.y,camera.Position.z,0));
             model_move = glm::translate(model_move, glm::vec3(model.m_obj[k]->m_pos.x, model.m_obj[k]->m_pos.y, model.m_obj[k]->m_pos.z));
             model_move = glm::rotate(model_move, glm::radians(-camera.Yaw), glm::vec3(0.0, 1.0, 0.0));
-
-            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model_move));
+            shader.setMat4("model", model_move);
         }
         if(k == 5)
         {
-            unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-            glm::mat4 model_move = glm::mat4(1.0f); 
+            model_move = glm::mat4(1.0f); 
             ((Ball*)(model.m_obj[k]))->sprit();
             //model.m_obj[k]->move(OBJ_Vector4d(camera.Position.x,camera.Position.y,camera.Position.z,0));
             model_move = glm::translate(model_move, glm::vec3(model.m_obj[k]->m_pos.x, model.m_obj[k]->m_pos.y, model.m_obj[k]->m_pos.z));
-        
-            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model_move));
+            shader.setMat4("model", model_move);
         }
+        
+        
+
         for(int i = 0; i <  model.m_obj[k]->m_f_muti.size(); i++)
         {
             string m_name = model.m_obj[k]->m_texture_name_string[i];
@@ -251,14 +157,14 @@ void draw(unsigned int shaderProgram)
             map<string, unsigned int>::iterator iter = model.m_obj[k]->Material_map_texture.find(m_name);  
             if(iter != model.m_obj[k]->Material_map_texture.end())  
             {
+                glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, iter->second);
             }
             glBindVertexArray(model.m_obj[k]->m_VAO[i]);
             glDrawArrays(GL_TRIANGLES, 0, model.m_obj[k]->m_v_vertices_size[i]);
         }
-        unsigned int modelLoc = glGetUniformLocation(shaderProgram, "model");
-        glm::mat4 model_move         = glm::mat4(1.0f); 
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model_move));
+        model_move = glm::mat4(1.0f);
+        shader.setMat4("model", model_move);
     }
 }
 int main()
@@ -319,26 +225,122 @@ int main()
         std::cout << "Failed to initialize GLAD" << std::endl;
         return -1;
     }    
-    unsigned int shaderProgram = init_shader();
-    init_buffer(shaderProgram);
+
+    // set up vertex data (and buffer(s)) and configure vertex attributes
+    // ------------------------------------------------------------------
 
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_MULTISAMPLE);
+    Shader shader("3.1.2.shadow_mapping.vs", "3.1.2.shadow_mapping.fs");
+    Shader simpleDepthShader("3.1.2.shadow_mapping_depth.vs", "3.1.2.shadow_mapping_depth.fs");
+    Shader debugDepthQuad("3.1.2.debug_quad.vs", "3.1.2.debug_quad_depth.fs");
+    init_buffer(shader.ID);
+    float planeVertices[] = {
+        // positions            // normals         // texcoords
+         25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
+        -25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f,
+        -25.0f, -0.5f, -25.0f,  0.0f, 1.0f, 0.0f,   0.0f, 25.0f,
 
-    model.show();
+         25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
+        -25.0f, -0.5f, -25.0f,  0.0f, 1.0f, 0.0f,   0.0f, 25.0f,
+         25.0f, -0.5f, -25.0f,  0.0f, 1.0f, 0.0f,  25.0f, 25.0f
+    };
+
+    // plane VAO
+    unsigned int planeVBO;
+    glGenVertexArrays(1, &planeVAO);
+    glGenBuffers(1, &planeVBO);
+    glBindVertexArray(planeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glBindVertexArray(0);
+
+    // configure depth map FBO
+    // -----------------------
+    const unsigned int SHADOW_WIDTH = 10240, SHADOW_HEIGHT = 10240;
+    unsigned int depthMapFBO;
+    glGenFramebuffers(1, &depthMapFBO);
+    // create depth texture
+    unsigned int depthMap;
+    glGenTextures(1, &depthMap);
+    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    // attach depth texture as FBO's depth buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // shader configuration
+    // --------------------
+    shader.use();
+    shader.setInt("diffuseTexture", 0);
+    shader.setInt("shadowMap", 1);
+    debugDepthQuad.use();
+    debugDepthQuad.setInt("depthMap", 0);
+
+    glm::vec3 lightPos(0, 50.0, 50);
+
+    //model.show();
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = static_cast<float>(glfwGetTime());
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
-
         processInput(window);
-        
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        // render
+        // ------
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glm::vec3 cameramove  = camera.Position;
-        projection_perform(cameramove, shaderProgram);
-        draw(shaderProgram);
+
+        //渲染阴影贴图
+        glm::mat4 lightProjection, lightView;
+        glm::mat4 lightSpaceMatrix;
+        float near_plane = -1000, far_plane = 1000;
+        lightProjection = glm::ortho(-1000.0f, 1000.0f, -1000.0f, 1000.0f, near_plane, far_plane);
+        lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, 1.0, 0.0));
+        lightSpaceMatrix = lightProjection * lightView;
+        // render scene from light's point of view
+        simpleDepthShader.use();
+        simpleDepthShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+            glClear(GL_DEPTH_BUFFER_BIT);
+            glActiveTexture(GL_TEXTURE0);
+            glCullFace(GL_FRONT);
+            draw(simpleDepthShader);
+            glCullFace(GL_BACK);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        //渲染真实场景
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        shader.use();
+        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 2000.0f);
+        glm::mat4 view = camera.GetViewMatrix();
+        shader.setMat4("projection", projection);
+        shader.setMat4("view", view);
+        // set light uniforms
+        shader.setVec3("viewPos", camera.Position);
+        shader.setVec3("lightPos", lightPos);
+        shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, depthMap);
+        draw(shader);
+        // render Depth map to quad for visual debugging
+        // ---------------------------------------------
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -349,8 +351,9 @@ int main()
             glDeleteVertexArrays(1, &model.m_obj[k]->m_VAO[i]);
         }
     }
-    
-    glDeleteProgram(shaderProgram);
+    glDeleteVertexArrays(1, &planeVAO);
+    glDeleteBuffers(1, &planeVBO);
+
     glfwTerminate();
     return 0;
 }

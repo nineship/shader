@@ -339,7 +339,7 @@ public:
         map<string, unsigned int>::iterator iter2;  
         for(iter2 = Material_map_texture.begin(); iter2 != Material_map_texture.end(); iter2++)  
         {
-            printf("obj newmtl:%s %d\n",iter2->first,iter2->second); 
+            //printf("obj newmtl:%s %s\n",iter2->first,iter2->second); 
         }
     }
 
